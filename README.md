@@ -7,19 +7,22 @@ Framework rekayasa perangkat lunak multi-agen otonom portabel berbasis **Antigra
 ## 📋 Daftar Isi
 1. [Gambaran Umum](#-gambaran-umum)
 2. [Instalasi Cepat (1-Klik Multi-Device)](#-instalasi-cepat-1-klik-multi-device)
+   - [Metode 1: 1-Prompt Setup via Agen AI](#metode-1-1-prompt-setup-via-agen-ai-rekomendasi)
+   - [Metode 2: Setup Manual via Terminal](#metode-2-setup-manual-via-terminal)
 3. [Verifikasi Instalasi](#-verifikasi-instalasi)
-4. [Struktur Direktori](#-struktur-direktori)
-5. [Peran Tim Agen (Roles & Responsibilities)](#-peran-tim-agen-roles--responsibilities)
-6. [Aturan Baku & Standar Rekayasa (Engineering Rules)](#-aturan-baku--standar-rekayasa-engineering-rules)
-7. [Panduan Penggunaan CLI (`team-orch` & `herdr-orch`)](#-panduan-penggunaan-cli-team-orch--herdr-orch)
-8. [Siklus Hidup Pengembangan Fitur (Lifecycle Workflow)](#-siklus-hidup-pengembangan-fitur-lifecycle-workflow)
+4. [Pembersihan Total (Clean Uninstallation)](#-pembersihan-total-clean-uninstallation)
+5. [Struktur Direktori](#-struktur-direktori)
+6. [Peran Tim Agen (Roles & Responsibilities)](#-peran-tim-agen-roles--responsibilities)
+7. [Aturan Baku & Standar Rekayasa (Engineering Rules)](#-aturan-baku--standar-rekayasa-engineering-rules)
+8. [Panduan Penggunaan CLI (`team-orch` & `herdr-orch`)](#-panduan-penggunaan-cli-team-orch--herdr-orch)
+9. [Siklus Hidup Pengembangan Fitur (Lifecycle Workflow)](#-siklus-hidup-pengembangan-fitur-lifecycle-workflow)
 
 ---
 
 ## 🌟 Gambaran Umum
 
 Framework ini memungkinkan satu atau lebih instans AI (Antigravity IDE, `agy` CLI, atau terminal panes Herdr) bekerja sebagai satu kesatuan tim engineering profesional:
-- **Zero-Friction Portability**: Siap dipasang di mesin macOS atau Linux mana pun dengan skrip instalasi 1-klik.
+- **Zero-Friction Portability**: Siap dipasang di mesin macOS atau Linux mana pun hanya dengan skrip instalasi atau 1 prompt ke AI.
 - **Strict Separation of Concerns (SoC)**: Membagi tugas antara PM, Tech Lead/Analis, Developer, dan Tech Writer.
 - **Hemat Token 85% - 90%**: Memilih model AI secara otomatis sesuai tingkat kompleksitas pekerjaan (Flash Low, Flash High, Pro High).
 - **Human-in-the-Loop Approval Gate**: Mencegah agen mengeksekusi implementasi sebelum dokumen kebutuhan disetujui secara eksplisit oleh User.
@@ -29,21 +32,40 @@ Framework ini memungkinkan satu atau lebih instans AI (Antigravity IDE, `agy` CL
 
 ## ⚡ Instalasi Cepat (1-Klik Multi-Device)
 
-Untuk memasang framework ini di perangkat baru (macOS / Linux):
+### Metode 1: 1-Prompt Setup via Agen AI (Rekomendasi)
+Jika Anda membuka Antigravity CLI (`agy`) atau Antigravity IDE di komputer/laptop baru, Anda cukup menyalin dan mengirim prompt berikut ke agen AI:
+
+> *"Tolong terapkan dan pasang autonomous multi-agent framework dari repositori ini: https://github.com/praharawidian-twp/agent/tree/v0.1.0"*
+
+Agen AI di laptop baru tersebut akan secara otomatis:
+1. Meng-clone repositori (branch `v0.1.0`).
+2. Menjalankan `./installer/install.sh`.
+3. Memastikan konfigurasi Herdr (`~/.config/herdr/config.toml`) siap.
+4. Menjalankan verifikasi `./installer/verify.sh` sampai seluruh agen siap bertugas.
+
+---
+
+### Metode 2: Setup Manual via Terminal
+
+Jalankan perintah berikut di terminal komputer baru Anda:
 
 ```bash
 # 1. Clone repositori ke komputer lokal Anda
-git clone https://github.com/praharawidian-twp/agent.git agent-framework
+git clone -b v0.1.0 https://github.com/praharawidian-twp/agent.git agent-framework
 cd agent-framework
 
 # 2. Jalankan skrip instalasi otomatis
 ./installer/install.sh
+
+# 3. Jalankan verifikasi instalasi
+./installer/verify.sh
 ```
 
 Skrip instalasi akan secara otomatis:
-- Memverifikasi prasyarat lingkungan (Python 3.8+).
+- Memverifikasi prasyarat lingkungan (Python 3.8+ dan ketersediaan Herdr).
+- Mengonfigurasi direktori Herdr `~/.config/herdr/config.toml` (`onboarding = false`) agar bebas hambatan wizard awal.
 - Mengonfigurasi direktori global `~/.gemini/team-orch/` (roles, templates, docs, scripts).
-- Membuat symbolic link untuk CLI tools (`team-orch` dan `herdr-orch`) di `~/.local/bin/`.
+- Membuat symbolic link untuk CLI tools (`team-orch`, `herdr-orch`, `team-orch-uninstall`) di `~/.local/bin/`.
 - Mendaftarkan global skill `team-orchestrator` di `~/.gemini/config/skills/`.
 - Mendaftarkan aturan global di `~/.gemini/GEMINI.md`.
 
@@ -64,15 +86,39 @@ Setelah instalasi selesai, jalankan skrip verifikasi untuk memastikan semua komp
 
 Output yang diharapkan:
 ```text
-=== VERIFYING AGENT FRAMEWORK SETUP ===
+=== VERIFIKASI SETUP FRAMEWORK MULTI-AGEN ===
 [PASS] team-orch CLI: /Users/.../.local/bin/team-orch
 [PASS] herdr-orch CLI: /Users/.../.local/bin/herdr-orch
-[PASS] Global roles (4) & templates (5) in ~/.gemini/team-orch/
-[PASS] Global skill registered
-[PASS] Global rules present in ~/.gemini/GEMINI.md
-========================================
-[ALL CHECKS PASSED - READY FOR MULTI-DEVICE DEPLOYMENT]
+[PASS] Skrip Pembersih (Uninstaller): Siap digunakan
+[PASS] Global roles (4) & templates (5) di ~/.gemini/team-orch/
+[PASS] Global skill terdaftar: ~/.gemini/config/skills/team-orchestrator/SKILL.md
+[PASS] Aturan global (Git Read-Only, Tech Lead, dll) aktif di ~/.gemini/GEMINI.md
+[PASS] Herdr terminal manager: herdr 0.9.0
+=============================================
+[ALL CHECKS PASSED - FRAMEWORK SIAP DIGUNAKAN DI SEMUA PERANGKAT]
 ```
+
+---
+
+## 🗑️ Pembersihan Total (Clean Uninstallation)
+
+Jika Anda atau rekan kerja yang Anda bagikan framework ini ingin menghapus instalasi secara bersih dari komputer tanpa meninggalkan berkas sampah atau efek samping:
+
+Cukup jalankan dari terminal mana saja:
+```bash
+team-orch-uninstall
+```
+Atau jalankan dari direktori repositori:
+```bash
+./installer/uninstall.sh
+```
+
+Skrip ini akan secara otomatis:
+- Menghapus symlinks `team-orch`, `herdr-orch`, dan `team-orch-uninstall` dari `~/.local/bin/`.
+- Menghapus direktori data `~/.gemini/team-orch/`.
+- Menghapus skill `~/.gemini/config/skills/team-orchestrator/`.
+- Mencadangkan dan menonaktifkan aturan `~/.gemini/GEMINI.md`.
+- Komputer kembali bersih 100% seperti sediakala.
 
 ---
 
@@ -107,9 +153,10 @@ agent-portable/
 │       ├── review-log-template.md      # Template review-log.md
 │       └── audit-trail-template.md     # Template audit-trail.md
 ├── installer/
-│   ├── install.sh                # Skrip instalasi 1-klik otomatis
+│   ├── install.sh                # Skrip instalasi 1-klik otomatis & Herdr check
 │   ├── verify.sh                 # Skrip verifikasi kesehatan sistem
-│   └── README.md                 # Panduan cepat installer
+│   ├── uninstall.sh              # Skrip pembersih total (Clean Uninstallation)
+│   └── README.md                 # Panduan cepat installer & uninstaller
 ├── AGENTS.md                     # Konfigurasi koordinasi agen workspace
 ├── GEMINI.md                     # Aturan baku orkestrasi & auto-switching model
 ├── herdr-orchestrator.py         # Engine orkestrator terminal Herdr (`herdr-orch`)
@@ -178,6 +225,9 @@ team-orch dispatch <role> <project_id> --pane <pane_id>
 
 # 8. Mengarsipkan proyek setelah selesai
 team-orch complete <project_id>
+
+# 9. Menghapus instalasi framework dari komputer
+team-orch-uninstall
 ```
 
 ### CLI `herdr-orch`:
