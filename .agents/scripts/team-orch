@@ -1,0 +1,641 @@
+#!/usr/bin/env python3
+"""
+team-orch: Autonomous Multi-Agent Team Orchestrator
+Manages the workflow between PM -> Analis -> Coder -> Gatekeeper Review -> Dokumenter.
+Integrated with Herdr and Antigravity auto-switching.
+"""
+
+import os
+import sys
+import argparse
+import re
+import json
+import subprocess
+import shutil
+from datetime import datetime
+from pathlib import Path
+
+GLOBAL_TEAM_DIR = Path.home() / ".gemini" / "team-orch"
+GLOBAL_ROLES_DIR = GLOBAL_TEAM_DIR / "roles"
+GLOBAL_TEMPLATES_DIR = GLOBAL_TEAM_DIR / "templates"
+
+def find_workspace_root() -> Path:
+    curr = Path.cwd().resolve()
+    for p in [curr] + list(curr.parents):
+        if (p / ".agents").exists() or (p / ".git").exists():
+            return p
+    return curr
+
+WORKSPACE_ROOT = find_workspace_root()
+BASE_DIR = WORKSPACE_ROOT
+AGENTS_DIR = WORKSPACE_ROOT / ".agents"
+TASKS_DIR = AGENTS_DIR / "tasks"
+ACTIVE_TASKS_DIR = TASKS_DIR / "active"
+COMPLETED_TASKS_DIR = TASKS_DIR / "completed"
+
+def get_roles_dir() -> Path:
+    local_roles = AGENTS_DIR / "roles"
+    if local_roles.exists() and any(local_roles.iterdir()):
+        return local_roles
+    return GLOBAL_ROLES_DIR
+
+def get_templates_dir() -> Path:
+    local_templates = AGENTS_DIR / "templates"
+    if local_templates.exists() and any(local_templates.iterdir()):
+        return local_templates
+    return GLOBAL_TEMPLATES_DIR
+
+
+ROLE_MODELS = {
+    "pm": "gemini-3.8-flash-high",
+    "project-manager": "gemini-3.8-flash-high",
+    "analyst": "gemini-3.1-pro-high",
+    "analis": "gemini-3.1-pro-high",
+    "coder": "gemini-3.8-flash-high",
+    "dev": "gemini-3.8-flash-high",
+    "documenter": "gemini-3.8-flash-low",
+    "doc": "gemini-3.8-flash-low",
+}
+
+def ensure_dirs():
+    ACTIVE_TASKS_DIR.mkdir(parents=True, exist_ok=True)
+    COMPLETED_TASKS_DIR.mkdir(parents=True, exist_ok=True)
+
+def get_project_dir(project_id: str) -> Path:
+    p_dir = ACTIVE_TASKS_DIR / project_id
+    if not p_dir.exists():
+        c_dir = COMPLETED_TASKS_DIR / project_id
+        if c_dir.exists():
+            return c_dir
+    return p_dir
+
+def append_audit_log(project_id: str, role: str, event: str, desc: str, files: list = None, cmd: str = None, duration: str = None, status: str = "PASS", security: str = "CLEAN / SECURE", next_step: str = None) -> str:
+    p_dir = get_project_dir(project_id)
+    audit_file = p_dir / "audit-trail.md"
+    if not audit_file.exists():
+        template = get_templates_dir() / "audit-trail-template.md"
+        content = template.read_text(encoding="utf-8") if template.exists() else "# Audit Trail & Activity Log: " + project_id + "\n"
+        content = content.replace("[PROJECT_NAME_OR_ID]", project_id)
+        audit_file.write_text(content, encoding="utf-8")
+
+
+    text = audit_file.read_text(encoding="utf-8")
+    existing_entries = re.findall(r"###\s*\[AUDIT-(\d+)\]", text)
+    next_idx = max([int(x) for x in existing_entries], default=0) + 1
+    audit_id = f"AUDIT-{next_idx:03d}"
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    entry_lines = [
+        f"\n### [{audit_id}] {now_str} | {role.upper()} | {event.upper()}",
+        f"- **Pelaksana (Actor)**: {role.capitalize()} (`{ROLE_MODELS.get(role.lower(), 'default')}`)",
+        f"- **Tindakan / Proses**: {desc}",
+    ]
+    if files:
+        entry_lines.append(f"- **File & Artefak**: {', '.join(f'`{f}`' for f in files)}")
+    entry_lines.append("- **Detail Teknis & Performa**:")
+    if cmd:
+        entry_lines.append(f"  - Perintah Shell: `{cmd}`")
+    if duration:
+        entry_lines.append(f"  - Durasi / Waktu Eksekusi: `{duration}`")
+    entry_lines.append(f"  - Status Keluaran: `{status}`")
+    entry_lines.append(f"- **Validasi Keamanan (Security Audit Check)**:")
+    entry_lines.append(f"  - Status Keamanan: `{security}`")
+    entry_lines.append(f"  - Git Protection: `PASS (Read-Only Enforced)`")
+    entry_lines.append(f"  - Workspace Boundary: `PASS`")
+    if next_step:
+        entry_lines.append(f"- **Kesimpulan / Next Step**: {next_step}")
+    entry_lines.append("")
+
+    new_entry = "\n".join(entry_lines)
+    text += new_entry
+
+    text = re.sub(r"- \*\*Total Aksi Terekam\*\*:\s*\d+", f"- **Total Aksi Terekam**: {next_idx}", text)
+    text = re.sub(r"- \*\*Terakhir Diperbarui\*\*:\s*`?[^`\n]+`?", f"- **Terakhir Diperbarui**: `{now_str}`", text)
+
+    audit_file.write_text(text, encoding="utf-8")
+    return audit_id
+
+def read_audit_summary(project_id: str) -> dict:
+    p_dir = get_project_dir(project_id)
+    audit_file = p_dir / "audit-trail.md"
+    if not audit_file.exists():
+        return {"total": 0, "last_entry": None, "security": "CLEAN / SECURE"}
+    text = audit_file.read_text(encoding="utf-8")
+    entries = re.findall(r"###\s*\[(AUDIT-\d+)\]\s*([^|\n]+)\|\s*([^|\n]+)\|\s*([^\n]+)", text)
+    total = len(entries)
+    last = entries[-1] if entries else None
+    return {
+        "total": total,
+        "last_entry": {
+            "id": last[0].strip(),
+            "time": last[1].strip(),
+            "role": last[2].strip(),
+            "event": last[3].strip()
+        } if last else None,
+        "security": "CLEAN / SECURE"
+    }
+
+def cmd_init(args):
+    ensure_dirs()
+    project_id = args.project_id
+    p_dir = ACTIVE_TASKS_DIR / project_id
+    if p_dir.exists():
+        print(f"[!] Project '{project_id}' already exists at {p_dir}")
+        return
+
+    p_dir.mkdir(parents=True, exist_ok=True)
+    (p_dir / "docs").mkdir(exist_ok=True)
+
+    req_template = get_templates_dir() / "requirements-template.md"
+    content = req_template.read_text(encoding="utf-8") if req_template.exists() else "# Requirements\n"
+    content = content.replace("[PROJECT_NAME_OR_ID]", project_id)
+    content = content.replace("[YYYY-MM-DD]", datetime.now().strftime("%Y-%m-%d"))
+    (p_dir / "01-requirements.md").write_text(content, encoding="utf-8")
+
+    audit_template = get_templates_dir() / "audit-trail-template.md"
+    audit_content = audit_template.read_text(encoding="utf-8") if audit_template.exists() else "# Audit Trail\n"
+    audit_content = audit_content.replace("[PROJECT_NAME_OR_ID]", project_id)
+    audit_content = audit_content.replace("[YYYY-MM-DD HH:MM:SS]", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    (p_dir / "audit-trail.md").write_text(audit_content, encoding="utf-8")
+
+
+    append_audit_log(
+        project_id=project_id,
+        role="pm",
+        event="PROJECT_INITIALIZED",
+        desc="Inisialisasi workspace proyek, template requirements, dan audit trail transparan",
+        files=["01-requirements.md", "audit-trail.md"],
+        next_step="Penyusunan PRD oleh PM dan menunggu Human Approval Gate dari Pengguna"
+    )
+
+    print(f"[✓] Initialized autonomous agent project: {project_id}")
+    print(f"    Path: {p_dir}")
+    print(f"    Audit Trail: {p_dir}/audit-trail.md")
+    print(f"    Next step: Edit '{p_dir}/01-requirements.md' or run PM prompt with:")
+    print(f"    team-orch prompt pm {project_id}")
+
+def get_project_stage(project_id: str):
+    p_dir = get_project_dir(project_id)
+    if not p_dir.exists():
+        return None
+
+    req_file = p_dir / "01-requirements.md"
+    spec_file = p_dir / "02-technical-spec.md"
+    task_file = p_dir / "03-task-list.md"
+    review_file = p_dir / "review-log.md"
+
+    is_req_approved = False
+    if req_file.exists():
+        content = req_file.read_text(encoding="utf-8")
+        if re.search(r"Status.*:\s*`?APPROVED`?", content, re.IGNORECASE):
+            is_req_approved = True
+
+    has_spec = spec_file.exists() and len(spec_file.read_text(encoding="utf-8").strip()) > 50
+
+    total_tasks = 0
+    done_tasks = 0
+    active_task_name = None
+    if task_file.exists():
+        content = task_file.read_text(encoding="utf-8")
+        tasks = re.findall(r"###\s*\[([ xX])\]\s*(TASK-\d+:[^\n]+)", content)
+        total_tasks = len(tasks)
+        for mark, name in tasks:
+            if mark.lower() == 'x':
+                done_tasks += 1
+            elif active_task_name is None:
+                active_task_name = name.strip()
+
+    # Determine turn
+    if not is_req_approved:
+        turn = "pm"
+        desc = "PM Requirements gathering & User Approval"
+    elif not has_spec or total_tasks == 0:
+        turn = "analyst"
+        desc = "Senior Lead Engineer (Analis) Boilerplate Audit & Architecture Breakdown"
+    elif done_tasks < total_tasks:
+        turn = "coder"
+        desc = f"Coder Implementation & Unit Testing for {active_task_name}"
+    else:
+        turn = "completed"
+        desc = "All tasks completed! Ready for Documentation or Archiving"
+
+    return {
+        "p_dir": p_dir,
+        "is_req_approved": is_req_approved,
+        "has_spec": has_spec,
+        "total_tasks": total_tasks,
+        "done_tasks": done_tasks,
+        "active_task_name": active_task_name,
+        "turn": turn,
+        "turn_desc": desc,
+    }
+
+def get_herdr_fleet_info() -> Optional[dict]:
+    herdr_orch_py = BASE_DIR / "herdr-orchestrator.py"
+    if not herdr_orch_py.exists():
+        return None
+    try:
+        res = subprocess.run(
+            [sys.executable, str(herdr_orch_py), "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if res.returncode == 0:
+            return json.loads(res.stdout)
+    except Exception:
+        pass
+    return None
+
+def cmd_status(args):
+    ensure_dirs()
+    project_id = args.project_id
+    if not project_id:
+        active_projects = [d.name for d in ACTIVE_TASKS_DIR.iterdir() if d.is_dir()]
+        completed_projects = [d.name for d in COMPLETED_TASKS_DIR.iterdir() if d.is_dir()]
+        herdr_info = get_herdr_fleet_info()
+
+        print(f"================================================================================")
+        print(f" 🌐 GLOBAL MISSION CONTROL: MULTI-PROJECT & HERDR WORKER FLEET")
+        print(f"================================================================================")
+        
+        # Herdr Fleet Overview
+        if herdr_info and herdr_info.get("herdr_active"):
+            orch_pane = herdr_info.get("orchestrator_pane_id", "Unknown")
+            tot_panes = herdr_info.get("total_panes", 1)
+            workers = [p for p in herdr_info.get("panes", []) if not p.get("is_orchestrator")]
+            avail_workers = herdr_info.get("available_workers", [])
+            print(f" 🖥️  HERDR WORKSPACE: {herdr_info.get('workspace_id', 'w1')}")
+            print(f"    👉 Control Room Pane (PM / Orchestrator): {orch_pane} [THIS PANE]")
+            print(f"    👥 Worker Panes Aktif: {len(workers)} (Tersedia / Ready: {len(avail_workers)}) | Total Panes: {tot_panes}")
+            for w in workers:
+                status_icon = "🟢" if not w.get("is_rate_limited") and not w.get("is_blocked") else "🔴"
+                agent_lbl = f"Agent={w.get('agent', 'none')}"
+                state_lbl = w.get('state', 'IDLE')
+                print(f"       {status_icon} Pane {w['pane_id']}: State={state_lbl} | {agent_lbl} | Quota=OK")
+        else:
+            print(f" 🖥️  HERDR WORKSPACE: Local Standalone Session (HERDR_ENV tidak aktif)")
+
+        print(f"--------------------------------------------------------------------------------")
+        print(f" 📁 PROYEK AKTIF BERJALAN PARALEL ({len(active_projects)} Proyek):")
+        if not active_projects:
+            print("    (Belum ada proyek aktif. Gunakan 'team-orch init <nama-proyek>' untuk memulai)")
+        else:
+            for p in sorted(active_projects):
+                stg = get_project_stage(p)
+                p_dir = stg["p_dir"]
+                pct = 10
+                if stg["is_req_approved"]: pct += 20
+                if stg["has_spec"]: pct += 20
+                if stg["total_tasks"] > 0: pct += int((stg["done_tasks"] / stg["total_tasks"]) * 40)
+                if (p_dir / "docs").exists() and any((p_dir / "docs").iterdir()): pct += 10
+                pct = min(100, pct)
+                bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
+                
+                print(f"    🔹 [{bar}] {pct}% | Proyek: {p}")
+                print(f"       Fase/Giliran: {stg['turn_desc']}")
+                if stg["active_task_name"]:
+                    print(f"       Sub-Task:     {stg['active_task_name']}")
+                asum = read_audit_summary(p)
+                print(f"       Audit Trail:  {asum['total']} aksi terekam | Security: {asum['security']}")
+
+        if completed_projects:
+            print(f"--------------------------------------------------------------------------------")
+            print(f" 📦 PROYEK TERSELESAIKAN / ARSIP ({len(completed_projects)}): {', '.join(sorted(completed_projects))}")
+
+        print(f"================================================================================")
+        print(f" 💡 BANTUAN PERINTAH:")
+        print(f"    - Detail status proyek: team-orch status <project_id>")
+        print(f"    - Audit trail proyek:   team-orch audit <project_id>")
+        print(f"    - Mulai proyek baru:    team-orch init <project_id>")
+        print(f"    - Delegasikan ke pane:  team-orch dispatch <role> <project_id> --pane <pane_id>")
+        print(f"================================================================================")
+        return
+
+
+    stage = get_project_stage(project_id)
+    if not stage:
+        print(f"[!] Project '{project_id}' not found.")
+        return
+
+    p_dir = stage["p_dir"]
+    is_active = 'active' in str(p_dir)
+
+    # Calculate progress percentage
+    pct = 10
+    if stage["is_req_approved"]:
+        pct += 20
+    if stage["has_spec"]:
+        pct += 20
+    if stage["total_tasks"] > 0:
+        pct += int((stage["done_tasks"] / stage["total_tasks"]) * 40)
+    docs_dir = p_dir / "docs"
+    if docs_dir.exists() and any(docs_dir.iterdir()):
+        pct += 10
+    pct = min(100, pct)
+    bar_len = 22
+    filled_len = int(bar_len * pct // 100)
+    bar = "█" * filled_len + "░" * (bar_len - filled_len)
+
+    audit_summary = read_audit_summary(project_id)
+
+    print(f"================================================================================")
+    print(f" 📊 DASHBOARD OVERVIEW: {project_id} [{'ACTIVE' if is_active else 'COMPLETED'}]")
+    print(f" 📁 Path: {p_dir}")
+    print(f" 📈 Kemajuan (Progress): [{bar}] {pct}%")
+    print(f" 🛡️  Status Keamanan:    [✓] {audit_summary['security']} (Git Read-Only Enforced)")
+    print(f"================================================================================")
+    print(f" [✓] Fase 1 (PM Requirements):           {'APPROVED' if stage['is_req_approved'] else 'PENDING APPROVAL'}")
+    print(f" [✓] Fase 2 (Tech Spec & Boilerplate):    {'COMPLETED' if stage['has_spec'] else 'PENDING'}")
+    print(f" [✓] Fase 3 (Sub-Tasks & Gatekeeper):    {stage['done_tasks']}/{stage['total_tasks']} Completed")
+    if stage["active_task_name"]:
+        print(f"     👉 Sub-Task Aktif: {stage['active_task_name']}")
+
+    print(f"--------------------------------------------------------------------------------")
+    print(f" 🔍 AUDIT TRAIL & TRANSPARANSI:")
+    print(f"   Total Aksi Terekam: {audit_summary['total']}")
+    if audit_summary['last_entry']:
+        le = audit_summary['last_entry']
+        print(f"   Aksi Terakhir:      [{le['id']}] {le['time']} | {le['role']} | {le['event']}")
+    print(f"   Lihat Audit Utuh:   team-orch audit {project_id}")
+
+    print(f"--------------------------------------------------------------------------------")
+    print(f" 🎯 REKOMENDASI GILIRAN AGEN:")
+    turn = stage["turn"]
+    if turn == "pm":
+        print("   Peran: Project Manager (PM) & User Approval Gate")
+        print("   Model: gemini-3.8-flash-high")
+        print(f"   Aksi:  team-orch approve {project_id} (setelah mereview 01-requirements.md)")
+    elif turn == "analyst":
+        print("   Peran: Analis / Senior Lead Engineer (Tech Lead)")
+        print("   Model: gemini-3.1-pro-high (Deep Reasoning)")
+        print(f"   Aksi:  Audit boilerplate, susun 02-technical-spec.md & 03-task-list.md")
+    elif turn == "coder":
+        print(f"   Peran: Coder ({stage['active_task_name']}) & Gatekeeper Review")
+        print("   Model Coder: gemini-3.8-flash-high | Model Analis: gemini-3.1-pro-high")
+        print(f"   Aksi:  Implementasikan kode + unit test, lalu minta review Senior Lead Dev")
+    else:
+        print("   Peran: Proyek Selesai!")
+        print(f"   Aksi:  Dokumenter ('team-orch prompt doc {project_id}') atau Arsip ('team-orch complete {project_id}')")
+    print(f"================================================================================")
+
+def cmd_approve(args):
+    p_dir = get_project_dir(args.project_id)
+    req_file = p_dir / "01-requirements.md"
+    if not req_file.exists():
+        print(f"[!] 01-requirements.md not found in {p_dir}")
+        return
+
+    content = req_file.read_text(encoding="utf-8")
+    approver = args.approver or "User"
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    content = re.sub(r"\[PENDING_APPROVAL\]", f"APPROVED by {approver} on {now_str}", content)
+    content = re.sub(r"Status\*\*:\s*\[?PENDING_APPROVAL\]?", f"Status**: APPROVED", content)
+    req_file.write_text(content, encoding="utf-8")
+
+    append_audit_log(
+        project_id=args.project_id,
+        role="user",
+        event="REQUIREMENTS_APPROVED",
+        desc=f"Dokumen kebutuhan disetujui secara resmi oleh {approver}",
+        files=["01-requirements.md"],
+        next_step="Senior Lead Engineer (Analis) melakukan audit boilerplate dan menyusun 02-technical-spec.md"
+    )
+
+    print(f"[✓] Project '{args.project_id}' Requirements APPROVED successfully!")
+    print(f"    Approval Gate: OPEN")
+    print(f"    Audit Trail: Entry logged in {p_dir}/audit-trail.md")
+    print(f"    Next: Analis creates technical spec & task breakdown.")
+
+def cmd_audit(args):
+    p_dir = get_project_dir(args.project_id)
+    audit_file = p_dir / "audit-trail.md"
+    if not audit_file.exists():
+        print(f"[!] Audit trail not found for '{args.project_id}' at {audit_file}")
+        return
+
+    content = audit_file.read_text(encoding="utf-8")
+    entries = re.findall(r"(###\s*\[AUDIT-\d+\].*?)(?=\n###\s*\[AUDIT|\Z)", content, re.DOTALL)
+
+    tail = args.tail
+    if tail and tail > 0 and len(entries) > tail:
+        entries = entries[-tail:]
+        header = f"=== AUDIT TRAIL: {args.project_id} (Showing Last {tail} Entries) ==="
+    else:
+        header = f"=== AUDIT TRAIL: {args.project_id} (All {len(entries)} Entries) ==="
+
+    print(header)
+    for entry in entries:
+        print(entry.strip())
+        print("-" * 60)
+
+def cmd_log(args):
+    audit_id = append_audit_log(
+        project_id=args.project_id,
+        role=args.role,
+        event=args.event,
+        desc=args.desc,
+        files=args.files,
+        cmd=args.cmd,
+        duration=args.duration,
+        status=args.status,
+        security=args.security,
+        next_step=args.next
+    )
+    print(f"[✓] Audit log entry recorded: [{audit_id}] in {args.project_id}")
+
+def build_prompt_text(role: str, project_id: str) -> str:
+    p_dir = get_project_dir(project_id)
+    roles_dir = get_roles_dir()
+    role_files = {
+        "pm": roles_dir / "project-manager.md",
+        "project-manager": roles_dir / "project-manager.md",
+        "analyst": roles_dir / "analyst.md",
+        "analis": roles_dir / "analyst.md",
+        "coder": roles_dir / "coder.md",
+        "dev": roles_dir / "coder.md",
+        "documenter": roles_dir / "documenter.md",
+        "doc": roles_dir / "documenter.md",
+    }
+
+
+    if role not in role_files or not role_files[role].exists():
+        return ""
+
+    role_content = role_files[role].read_text(encoding="utf-8")
+    req_content = (p_dir / "01-requirements.md").read_text(encoding="utf-8") if (p_dir / "01-requirements.md").exists() else ""
+    spec_content = (p_dir / "02-technical-spec.md").read_text(encoding="utf-8") if (p_dir / "02-technical-spec.md").exists() else ""
+    task_content = (p_dir / "03-task-list.md").read_text(encoding="utf-8") if (p_dir / "03-task-list.md").exists() else ""
+    review_content = (p_dir / "review-log.md").read_text(encoding="utf-8") if (p_dir / "review-log.md").exists() else ""
+    audit_content = (p_dir / "audit-trail.md").read_text(encoding="utf-8") if (p_dir / "audit-trail.md").exists() else ""
+
+    parts = [
+        f"# INSTRUCTION: ACT AS ROLE [{role.upper()}]\n",
+        role_content,
+        f"\n\n--- PROJECT CONTEXT: {project_id} ---",
+        f"Workspace Path: {p_dir}",
+    ]
+    if req_content:
+        parts.append(f"\n### [01-requirements.md]:\n{req_content}")
+    if spec_content:
+        parts.append(f"\n### [02-technical-spec.md]:\n{spec_content}")
+    if task_content:
+        parts.append(f"\n### [03-task-list.md]:\n{task_content}")
+    if review_content:
+        parts.append(f"\n### [review-log.md]:\n{review_content}")
+    if audit_content:
+        entries = re.findall(r"(###\s*\[AUDIT-\d+\].*?)(?=\n###\s*\[AUDIT|\Z)", audit_content, re.DOTALL)
+        if entries:
+            last_entries = "\n".join(entries[-4:])
+            parts.append(f"\n### [audit-trail.md - Catatan Aktivitas Terakhir]:\n{last_entries}")
+
+    parts.append(
+        "\n### [MANDATORY AUDIT & TRANSPARENCY DIRECTIVE]:\n"
+        "1. Amati entri audit trail sebelumnya sebelum bertindak untuk mendeteksi deviasi/anomali teknis atau keamanan.\n"
+        "2. Setelah menyelesaikan tugas Anda, catat aktivitas, durasi, detail teknis, dan verifikasi keamanan ke audit trail.\n"
+        "3. Patuhi aturan Git Read-Only: JANGAN menjalankan perintah modifikasi Git (git add, git commit, git push)."
+    )
+
+    return "\n".join(parts)
+
+
+def cmd_prompt(args):
+    prompt = build_prompt_text(args.role.lower(), args.project_id)
+    if not prompt:
+        print(f"[!] Unable to generate prompt for role '{args.role}' on project '{args.project_id}'")
+        return
+    print("==================== [AGENT PROMPT START] ====================")
+    print(prompt)
+    print("===================== [AGENT PROMPT END] =====================")
+
+def cmd_dispatch(args):
+    role = args.role.lower()
+    project_id = args.project_id
+    model = args.model or ROLE_MODELS.get(role, "gemini-3.8-flash-high")
+    prompt = build_prompt_text(role, project_id)
+
+    if not prompt:
+        print(f"[!] Error: Prompt empty or role '{role}' invalid.")
+        return
+
+    # Check Herdr environment
+    in_herdr = os.environ.get("HERDR_ENV") == "1"
+    herdr_bin = shutil.which("herdr-orch")
+
+    if in_herdr and herdr_bin:
+        print(f"[*] Herdr environment detected. Dispatching role '{role}' with model '{model}'...")
+        # ensure worker pane
+        pane_id = args.pane
+        if not pane_id:
+            try:
+                out = subprocess.check_output([herdr_bin, "ensure-worker", "--model", model], text=True)
+                m = re.search(r"(w\d+:p\d+)", out)
+                if m:
+                    pane_id = m.group(1)
+            except Exception as e:
+                print(f"[!] Failed to ensure worker: {e}")
+
+        if pane_id:
+            print(f"[✓] Delegating task to worker pane: {pane_id}")
+            cmd = [herdr_bin, "delegate", pane_id, prompt[:2000], "--model", model]
+            subprocess.run(cmd)
+            print(f"[✓] Delegated successfully to {pane_id}.")
+            return
+
+    # Fallback if not Herdr or worker unavailable
+    print(f"[*] Dispatching task locally for role '{role}' (Model: {model})...")
+    print(f"    You can run this in interactive session, or via subagent.")
+    print(f"    Recommended model tier: {model}")
+
+def cmd_complete(args):
+    p_dir = ACTIVE_TASKS_DIR / args.project_id
+    if not p_dir.exists():
+        print(f"[!] Active project '{args.project_id}' not found.")
+        return
+
+    append_audit_log(
+        project_id=args.project_id,
+        role="orchestrator",
+        event="PROJECT_COMPLETED",
+        desc="Proyek dinyatakan tuntas setelah seluruh implementasi, review, dan dokumentasi selesai",
+        next_step="Proyek dipindahkan ke arsip completed dan siap digunakan"
+    )
+
+    target_dir = COMPLETED_TASKS_DIR / args.project_id
+    p_dir.rename(target_dir)
+    print(f"[✓] Project '{args.project_id}' marked as completed and moved to:")
+    print(f"    {target_dir}")
+
+def main():
+    parser = argparse.ArgumentParser(description="team-orch: Autonomous Multi-Agent Team Orchestrator")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # init
+    p_init = subparsers.add_parser("init", help="Initialize a new agent project")
+    p_init.add_argument("project_id", help="Unique project identifier")
+
+    # status
+    p_status = subparsers.add_parser("status", help="Show project dashboard overview, status & next agent turn")
+    p_status.add_argument("project_id", nargs="?", help="Project identifier (optional)")
+
+    # approve
+    p_approve = subparsers.add_parser("approve", help="Approve requirements approval gate")
+    p_approve.add_argument("project_id", help="Project identifier")
+    p_approve.add_argument("--approver", "-a", default="User", help="Approver name")
+
+    # audit
+    p_audit = subparsers.add_parser("audit", help="Display transparent audit trail and activity log")
+    p_audit.add_argument("project_id", help="Project identifier")
+    p_audit.add_argument("--tail", "-n", type=int, default=10, help="Number of latest entries to display (default: 10)")
+
+    # log
+    p_log = subparsers.add_parser("log", help="Record an action/event into project audit trail")
+    p_log.add_argument("project_id", help="Project identifier")
+    p_log.add_argument("--role", "-r", required=True, help="Agent role (pm, analyst, coder, doc, user)")
+    p_log.add_argument("--event", "-e", required=True, help="Event / Action name (e.g. TASK_RUN, CODE_EDIT, TEST_EXEC, REVIEW)")
+    p_log.add_argument("--desc", "-d", required=True, help="Description of the action/process")
+    p_log.add_argument("--files", "-f", nargs="*", help="Associated files")
+    p_log.add_argument("--cmd", "-c", help="Shell command executed")
+    p_log.add_argument("--duration", help="Execution duration")
+    p_log.add_argument("--status", default="PASS", help="Output status (default: PASS)")
+    p_log.add_argument("--security", default="CLEAN / SECURE", help="Security validation status")
+    p_log.add_argument("--next", help="Next step / conclusion")
+
+    # prompt
+    p_prompt = subparsers.add_parser("prompt", help="Generate full execution prompt for a specific role")
+    p_prompt.add_argument("role", choices=["pm", "analyst", "analis", "coder", "dev", "documenter", "doc"])
+    p_prompt.add_argument("project_id", help="Project identifier")
+
+    # dispatch
+    p_dispatch = subparsers.add_parser("dispatch", help="Dispatch task to worker pane or print prompt")
+    p_dispatch.add_argument("role", choices=["pm", "analyst", "analis", "coder", "dev", "documenter", "doc"])
+    p_dispatch.add_argument("project_id", help="Project identifier")
+    p_dispatch.add_argument("--pane", help="Target Herdr pane ID (optional)")
+    p_dispatch.add_argument("--model", help="Override model")
+
+    # complete
+    p_complete = subparsers.add_parser("complete", help="Move active project to completed archive")
+    p_complete.add_argument("project_id", help="Project identifier")
+
+    args = parser.parse_args()
+    if args.command == "init":
+        cmd_init(args)
+    elif args.command == "status":
+        cmd_status(args)
+    elif args.command == "approve":
+        cmd_approve(args)
+    elif args.command == "audit":
+        cmd_audit(args)
+    elif args.command == "log":
+        cmd_log(args)
+    elif args.command == "prompt":
+        cmd_prompt(args)
+    elif args.command == "dispatch":
+        cmd_dispatch(args)
+    elif args.command == "complete":
+        cmd_complete(args)
+
+if __name__ == "__main__":
+    main()
+

@@ -1,0 +1,11 @@
+{
+  "herdr-autoswitch": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "python3 .agents/hooks/herdr-autoswitch.py",
+        "timeout": 5
+      }
+    ]
+  }
+}
