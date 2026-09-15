@@ -35,10 +35,10 @@ Framework ini memungkinkan satu atau lebih instans AI (Antigravity IDE, `agy` CL
 ### Metode 1: 1-Prompt Setup via Agen AI (Rekomendasi)
 Jika Anda membuka Antigravity CLI (`agy`) atau Antigravity IDE di komputer/laptop baru, Anda cukup menyalin dan mengirim prompt berikut ke agen AI:
 
-> *"Tolong terapkan dan pasang autonomous multi-agent framework dari repositori ini: https://github.com/praharawidian-twp/agent/tree/v0.1.0"*
+> *"Tolong terapkan dan pasang autonomous multi-agent framework dari repositori ini: https://github.com/praharawidian-twp/agent/tree/v0.1.1"*
 
 Agen AI di laptop baru tersebut akan secara otomatis:
-1. Meng-clone repositori (branch `v0.1.0`).
+1. Meng-clone repositori (branch `v0.1.1`).
 2. Menjalankan `./installer/install.sh`.
 3. Memastikan konfigurasi Herdr (`~/.config/herdr/config.toml`) siap.
 4. Menjalankan verifikasi `./installer/verify.sh` sampai seluruh agen siap bertugas.
@@ -51,7 +51,7 @@ Jalankan perintah berikut di terminal komputer baru Anda:
 
 ```bash
 # 1. Clone repositori ke komputer lokal Anda
-git clone -b v0.1.0 https://github.com/praharawidian-twp/agent.git agent-framework
+git clone -b v0.1.1 https://github.com/praharawidian-twp/agent.git agent-framework
 cd agent-framework
 
 # 2. Jalankan skrip instalasi otomatis

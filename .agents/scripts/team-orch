@@ -15,6 +15,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+VERSION = "0.1.1"
+
 GLOBAL_TEAM_DIR = Path.home() / ".gemini" / "team-orch"
 GLOBAL_ROLES_DIR = GLOBAL_TEAM_DIR / "roles"
 GLOBAL_TEMPLATES_DIR = GLOBAL_TEAM_DIR / "templates"
@@ -509,6 +511,38 @@ def cmd_prompt(args):
     print(prompt)
     print("===================== [AGENT PROMPT END] =====================")
 
+def ensure_agy_auto_installed() -> bool:
+    if shutil.which("agy-auto"):
+        return True
+    agy_bin = shutil.which("agy")
+    if not agy_bin:
+        print("[!] 'agy' CLI tidak ditemukan di PATH. Tidak dapat menginisialisasi agy-auto.")
+        return False
+    target_path = Path.home() / ".local" / "bin" / "agy-auto"
+    print(f"[?] 'agy-auto' belum terpasang. Menyiapkan wrapper otomatis di {target_path}...")
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text("#!/usr/bin/env bash\nexec agy --dangerously-skip-permissions \"$@\"\n", encoding="utf-8")
+        target_path.chmod(0o755)
+        print(f"[✓] Wrapper 'agy-auto' berhasil dipasang dan siap digunakan.")
+        return True
+    except Exception as e:
+        print(f"[!] Gagal memasang wrapper 'agy-auto': {e}")
+        return False
+
+def get_role_introduction(role: str) -> str:
+    role_titles = {
+        "analyst": "Analis / Senior Lead Engineer (Tech Lead)",
+        "analis": "Analis / Senior Lead Engineer (Tech Lead)",
+        "coder": "Coder / Software Developer",
+        "dev": "Coder / Software Developer",
+        "documenter": "Dokumenter / Tech Writer",
+        "doc": "Dokumenter / Tech Writer",
+        "pm": "Project Manager (PM)"
+    }
+    title = role_titles.get(role, role.capitalize())
+    return f"Halo Pengguna dan Tim! Saya adalah {title}. Saya siap menjalankan tugas dan berkoordinasi secara otonom dalam proyek ini."
+
 def cmd_dispatch(args):
     role = args.role.lower()
     project_id = args.project_id
@@ -519,13 +553,18 @@ def cmd_dispatch(args):
         print(f"[!] Error: Prompt empty or role '{role}' invalid.")
         return
 
+    # Pastikan wrapper agy-auto tersedia
+    ensure_agy_auto_installed()
+
     # Check Herdr environment
     in_herdr = os.environ.get("HERDR_ENV") == "1"
     herdr_bin = shutil.which("herdr-orch")
 
     if in_herdr and herdr_bin:
+        intro = get_role_introduction(role)
         print(f"[*] Herdr environment detected. Dispatching role '{role}' with model '{model}'...")
-        # ensure worker pane
+        print(f"    [1 Role = 1 Dedicated Pane]: Memastikan worker pane terpisah untuk {role}...")
+        # ensure dedicated worker pane
         pane_id = args.pane
         if not pane_id:
             try:
@@ -537,8 +576,9 @@ def cmd_dispatch(args):
                 print(f"[!] Failed to ensure worker: {e}")
 
         if pane_id:
-            print(f"[✓] Delegating task to worker pane: {pane_id}")
-            cmd = [herdr_bin, "delegate", pane_id, prompt[:2000], "--model", model]
+            print(f"[✓] Delegating task to dedicated worker pane: {pane_id}")
+            full_prompt = f"{intro}\n\n{prompt}"
+            cmd = [herdr_bin, "delegate", pane_id, full_prompt, "--model", model]
             subprocess.run(cmd)
             print(f"[✓] Delegated successfully to {pane_id}.")
             return
@@ -568,7 +608,8 @@ def cmd_complete(args):
     print(f"    {target_dir}")
 
 def main():
-    parser = argparse.ArgumentParser(description="team-orch: Autonomous Multi-Agent Team Orchestrator")
+    parser = argparse.ArgumentParser(description=f"team-orch v{VERSION}: Autonomous Multi-Agent Team Orchestrator")
+    parser.add_argument("--version", "-v", action="version", version=f"team-orch v{VERSION}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # init

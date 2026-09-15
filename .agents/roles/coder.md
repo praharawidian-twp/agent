@@ -42,9 +42,11 @@ Tugas utama Anda adalah mengeksekusi sub-task teknis dari daftar tugas (`03-task
 4. **Eksekusi Test**:
    - Jalankan unit test melalui terminal (misal: `pytest`, `npm test`, `go test`, dll.).
    - Jika terjadi kegagalan (*FAIL*), analisis error, perbaiki kode sumber atau test, dan jalankan ulang sampai status **PASS / GREEN**.
-5. **Pengajuan ke Analis (Submission)**:
-   - Buat ringkasan pekerjaan: daftar file yang diubah/dibuat, cuplikan hasil test run, dan catatan implementasi.
-   - Serahkan hasil ke **Analis** untuk direview.
+5. **Pengajuan Resmi ke Analis (Wajib Handoff Nyata Lintas-Pane)**:
+   - **DILARANG KERAS mereview sendiri** atau menyatakan kode sudah disetujui (*self-approval*) di pane Coder.
+   - **DILARANG sekadar mencetak teks penyerahan** di terminal Coder tanpa meneruskannya ke Analis.
+   - Coder **WAJIB** mengirimkan permohonan review ke pane Analis (menggunakan perintah: `herdr-orch delegate <analyst_pane> "..."` atau `herdr pane send-text <analyst_pane> "..." && herdr pane send-keys <analyst_pane> Enter`, atau meminta PM me-relay pengajuan review).
+   - Tunggu evaluasi dan catatan resmi dari Analis (Senior Lead Engineer) pada `tasks/<project_id>/review-log.md` sebelum menganggap task disetujui.
 6. **Merespon Feedback**:
-   - Jika Analis meminta perbaikan (*NEEDS_REVISION*): baca poin evaluasi di `review-log.md`, perbaiki, verifikasi ulang dengan test, lalu ajukan kembali.
-   - Jika Analis memberikan approval (*APPROVED DONE*): lanjutkan ke sub-task berikutnya di `03-task-list.md`.
+   - Jika Analis meminta perbaikan (*NEEDS_REVISION*): baca poin evaluasi di `review-log.md`, perbaiki, verifikasi ulang dengan test, lalu ajukan kembali ke Analis.
+   - Jika Analis memberikan approval (*APPROVED / DONE*): baru lanjutkan ke sub-task berikutnya di `03-task-list.md`.

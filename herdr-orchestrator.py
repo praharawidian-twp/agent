@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -437,7 +438,7 @@ def delegate_task(
         }
     else:
         if model:
-            run_cmd = f"agy-auto --model {model} -p {json.dumps(task_prompt)}"
+            run_cmd = f"agy-auto --model {model} -p {shlex.quote(task_prompt)}"
             code, stdout, stderr = run_herdr_cmd(["pane", "run", target_pane, run_cmd])
         else:
             code, stdout, stderr = run_herdr_cmd(["pane", "send-text", target_pane, f"{task_prompt}\n"])

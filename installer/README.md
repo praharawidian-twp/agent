@@ -10,10 +10,10 @@ Direktori ini menyediakan skrip otomatisasi untuk memasang (*install*), memverif
 Jika Anda membuka Antigravity IDE atau Antigravity CLI (`agy`) di komputer baru, Anda cukup memberikan instruksi berikut ke agen:
 
 > **Prompt ke AI Agen:**  
-> *"Tolong terapkan dan pasang autonomous multi-agent framework dari repositori ini: https://github.com/praharawidian-twp/agent/tree/v0.1.0"*
+> *"Tolong terapkan dan pasang autonomous multi-agent framework dari repositori ini: https://github.com/praharawidian-twp/agent/tree/v0.1.1"*
 
 Agen AI akan secara otomatis:
-1. Meng-clone repositori (atau mengambil branch `v0.1.0`).
+1. Meng-clone repositori (atau mengambil branch `v0.1.1`).
 2. Menjalankan `./installer/install.sh`.
 3. Memastikan konfigurasi Herdr (`~/.config/herdr/config.toml`) siap.
 4. Menjalankan `./installer/verify.sh` untuk memastikan seluruh agen (PM, Analis, Coder, Dokumenter) aktif.
